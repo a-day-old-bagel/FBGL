@@ -7,32 +7,9 @@
 #include <sys/ioctl.h>
 #include <stdint.h>
 
-#define BLUE  0
-#define GREEN 1
-#define RED   2
-#define ALPHA 3
+#include "fbglTypes.h"
 
 #define WHICH_FB "fb0"
-
-struct SubScreen {
-    uint16_t posX;
-    uint16_t posY;
-    uint16_t width;
-    uint16_t height;
-    struct SubScreen* child0;
-    struct SubScreen* sibling;
-};
-
-struct Screen {
-    uint8_t* fb;
-    int fbFile;
-    uint16_t width;
-    uint16_t height;
-    uint8_t BpPixel;  // Bytes per pixel
-    uint16_t BpLine;  // Bytes per line
-    uint32_t BpFrame; // Bytes per frame
-    struct SubScreen* child0;
-};
 
 int initScreen(struct Screen* screen) {
     struct fb_var_screeninfo fbInfoV;
@@ -40,17 +17,17 @@ int initScreen(struct Screen* screen) {
 
     screen->fbFile = open("/dev/" WHICH_FB, O_RDWR);
     if (screen->fbFile == -1) {
-        perror("Could not access framebuffer at /dev/" WHICH_FB "!");
+        perror("Could not access framebuffer at /dev/" WHICH_FB "!\n");
         return 1;
     }
-    printf("Framebuffer accessed.\n");
+    printf("Framebuffer accessed: " WHICH_FB "\n");
 
     if (ioctl(screen->fbFile, FBIOGET_FSCREENINFO, &fbInfoF) == -1) {
-        perror("Could not access fixed framebuffer information!");
+        perror("Could not access fixed framebuffer information!\n");
         return 2;
     }
     if (ioctl(screen->fbFile, FBIOGET_VSCREENINFO, &fbInfoV) == -1) {
-        perror("Could not access variable framebuffer information!");
+        perror("Could not access variable framebuffer information!\n");
         return 3;
     }
     screen->width = fbInfoV.xres;
@@ -62,7 +39,7 @@ int initScreen(struct Screen* screen) {
 
     screen->fb = (uint8_t*)mmap(0, screen->BpFrame, PROT_READ | PROT_WRITE, MAP_SHARED, screen->fbFile, 0);
     if ((int)screen->fb == -1) {
-        perror("Could not map framebuffer to memory!");
+        perror("Could not map framebuffer to memory!\n");
         return 4;
     }
     printf("Framebuffer mapped to memory.\n");
@@ -70,7 +47,19 @@ int initScreen(struct Screen* screen) {
     return 0;  
 }
 
+void destroySubScreen(struct SubScreen* subscr) {
+	if (subscr != NULL) {
+		if (subscr->sibling) {
+			destroySubScreen(subscr->sibling);
+		}
+		if (subscr->child) {
+			destroySubScreen(subscr->child);
+		}
+	}
+}
+
 int destroyScreen(struct Screen* screen) {
+	destroySubScreen(screen->child);
     munmap(screen->fb, screen->BpFrame);
     close(screen->fbFile);
     return 0;

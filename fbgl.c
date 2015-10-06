@@ -7,11 +7,67 @@
 #include <sys/ioctl.h>
 #include <stdint.h>
 
-#include "fbglTypes.h"
+#include "fbgl.h"
 
 #define WHICH_FB "fb0"
 
-int initScreen(struct Screen* screen) {
+static int fbgl_addSibling(fbgl_SubScreen* first, fbgl_SubScreen* second) {
+	if (first->sibling) {
+		return fbgl_addSibling(first->sibling, second);
+	} else {
+		first->sibling = second;
+		return 0;
+	}
+}
+
+static void fbgl_initObjCollection(fbgl_ObjCollection* objs) {
+	objs->os2 = NULL;
+	objs->ov2 = NULL;
+	objs->ot2 = NULL;
+	objs->ls2 = NULL;
+	objs->lv2 = NULL;
+	objs->lt2 = NULL;
+}
+
+void fbgl_initSubScr(fbgl_SubScreen* subscr) {
+	subscr->posX = -0.9f;
+	subscr->posY = -0.9f;
+	subscr->width = 1.8f;
+	subscr->height = 1.8f;
+	subscr->r = 64;
+	subscr->g = 255;
+	subscr->b = 64;
+	subscr->a = 255;
+	subscr->style = LINES;
+	fbgl_initObjCollection(&subscr->objs);
+	subscr->child = NULL;
+	subscr->sibling = NULL;
+}
+
+void fbgl_destroySubScr(fbgl_SubScreen* subscr) {
+	if (subscr->sibling) {
+		fbgl_destroySubScr(subscr->sibling);
+		subscr->sibling = NULL;
+	}
+	if (subscr->child) {
+		fbgl_destroySubScr(subscr->child);
+		subscr->child = NULL;
+	}
+}
+
+void fbgl_destroyScreen(fbgl_Screen* screen) {
+	if (screen->child) {
+		fbgl_destroySubScr(screen->child);
+		screen->child = NULL;
+	}
+    munmap(screen->fb, screen->BpScreen);
+    close(screen->fbFile);
+}
+
+int fbgl_initScreen(fbgl_Screen* screen) {
+	screen->fb = NULL;
+	screen->child = NULL;
+
     struct fb_var_screeninfo fbInfoV;
     struct fb_fix_screeninfo fbInfoF;
 
@@ -20,8 +76,6 @@ int initScreen(struct Screen* screen) {
         perror("Could not access framebuffer at /dev/" WHICH_FB "!\n");
         return 1;
     }
-    printf("Framebuffer accessed: " WHICH_FB "\n");
-
     if (ioctl(screen->fbFile, FBIOGET_FSCREENINFO, &fbInfoF) == -1) {
         perror("Could not access fixed framebuffer information!\n");
         return 2;
@@ -31,151 +85,145 @@ int initScreen(struct Screen* screen) {
         return 3;
     }
     screen->width = fbInfoV.xres;
+    screen->normFactorX = 2.f / (float)screen->width;
+    screen->deNormFactorX = (float)screen->width / 2.f;
     screen->height = fbInfoV.yres;
+    screen->normFactorY = 2.f / (float)screen->height;
+    screen->deNormFactorY = (float)screen->height / 2.f;
     screen->BpPixel = fbInfoV.bits_per_pixel / 8;
     screen->BpLine = fbInfoF.line_length;
-    screen->BpFrame =  screen->width * screen->height * screen->BpPixel;
-    printf("Screen: %dx%d, %dbpp\n", screen->width, screen->height, fbInfoV.bits_per_pixel);
+    screen->BpScreen =  screen->width * screen->height * screen->BpPixel;
 
-    screen->fb = (uint8_t*)mmap(0, screen->BpFrame, PROT_READ | PROT_WRITE, MAP_SHARED, screen->fbFile, 0);
-    if ((int)screen->fb == -1) {
+    screen->fb = (uint8_t*)mmap(0, screen->BpScreen, PROT_READ | PROT_WRITE, MAP_SHARED, screen->fbFile, 0);
+    if ((intptr_t)screen->fb == -1) {
         perror("Could not map framebuffer to memory!\n");
         return 4;
     }
-    printf("Framebuffer mapped to memory.\n");
 
     return 0;  
 }
 
-void destroySubScreen(struct SubScreen* subscr) {
-	if (subscr != NULL) {
-		if (subscr->sibling) {
-			destroySubScreen(subscr->sibling);
+int fbgl_makeSubScrMajor(fbgl_Screen* parentScreen, fbgl_SubScreen* subscr) {
+	if (parentScreen->child) {
+		return fbgl_addSibling(parentScreen->child, subscr);
+	} else {
+		parentScreen->child = subscr;
+		return 0;
+	}
+}
+
+int fbgl_makeSubScrMinor(fbgl_SubScreen* parentSubscr, fbgl_SubScreen* subscr) {
+	// keep list of subscrs that have been used as parameters, then if second parameter is in that list, error (loop)
+	// OR use Floyd's algorithm on each sibling (at end of function)
+
+	if (parentSubscr->child) {
+		return fbgl_addSibling(parentSubscr->child, subscr);
+	} else {
+		parentSubscr->child = subscr;
+		return 0;
+	}
+}
+
+// Coolest function ever.
+static inline int fbgl_sign(int val) {
+    return (0 < val) - (val < 0);
+    // -1 if neg, 0 if 0, +1 if pos
+}
+
+static inline void fbgl_drawPixel(fbgl_Screen* screen, int x, int y,
+								  int r, int g, int b, int a) {
+	uint32_t pixOffset = x * screen->BpPixel + y * screen->BpLine;	
+	if (pixOffset <= screen->BpScreen) {
+		uint8_t* memLoc = screen->fb + pixOffset;
+		*memLoc   = b;
+	    *++memLoc = g;
+	    *++memLoc = r;
+	    *++memLoc = a;
+	}
+}
+
+static void fbgl_drawLineSolid(fbgl_Screen* screen, int x0, int y0,
+							   int x1, int y1, int r, int g, int b, int a){
+	int dx = abs(x1 - x0);
+	int dy = abs(y1 - y0);
+	int swap = 0;
+	if (dy > dx) {
+		int temp = dx;
+		dx = dy;
+		dy = temp;
+		swap = 1;
+	}
+	int s1 = fbgl_sign(x1 - x0);
+	int s2 = fbgl_sign(y1 - y0);
+	int D = 2 * dy - dx;
+	int x = x0;
+	int y = y0;
+	int i;
+	for (i = 0; i < dx; i++)
+	{
+		fbgl_drawPixel(screen, x, y, r, g, b, a);
+		while (D >= 0) {
+			D = D - 2 * dx;
+			if (swap) {
+				x += s1;
+			} else {
+				y += s2;
+			}
 		}
-		if (subscr->child) {
-			destroySubScreen(subscr->child);
+		D = D + 2 * dy;
+		if (swap) {
+			y += s2;
+		} else {
+			x += s1;
 		}
 	}
 }
 
-int destroyScreen(struct Screen* screen) {
-	destroySubScreen(screen->child);
-    munmap(screen->fb, screen->BpFrame);
-    close(screen->fbFile);
-    return 0;
+static void fbgl_drawSubScrXBox(fbgl_Screen* screen, fbgl_SubScreen* s,
+						        int minX, int maxX, int minY, int maxY) {
+	fbgl_drawLineSolid(screen, minX, minY, minX, maxY, s->r, s->g, s->b, s->a);
+	fbgl_drawLineSolid(screen, minX, maxY, maxX, maxY, s->r, s->g, s->b, s->a);
+	fbgl_drawLineSolid(screen, maxX, maxY, maxX, minY, s->r, s->g, s->b, s->a);
+	fbgl_drawLineSolid(screen, maxX, minY, minX, minY, s->r, s->g, s->b, s->a);
+	fbgl_drawLineSolid(screen, minX, minY, maxX, maxY, s->r, s->g, s->b, s->a);
+	fbgl_drawLineSolid(screen, maxX, minY, minX, maxY, s->r, s->g, s->b, s->a);
 }
 
-int main()
-{
-    struct Screen screen;
-    int result = initScreen(&screen);
-    if (result == 0) { // If init was successful
-        int x, y, pixOffset;
-        for (y = 100; y < 300; y++) {
-            for (x = 100; x < 300; x++) {
-
-                pixOffset = x * screen.BpPixel +
-                           y * screen.BpLine;
-
-                *(screen.fb + pixOffset) = 15+(x-100)/2;
-                *(screen.fb + pixOffset + 1) = 200-(y-100)/5;
-                *(screen.fb + pixOffset + 2) = 100;
-                *(screen.fb + pixOffset + 3) = 0;
-            }
+static void fbgl_drawSubScrFill(fbgl_Screen* screen, fbgl_SubScreen* s,
+						  	    int minX, int maxX, int minY, int maxY) {
+	int x, y;
+	for (y = minY; y > maxY; --y) {	// y is upside down
+        for (x = minX; x < maxX; ++x) {
+        	fbgl_drawPixel(screen, x, y, s->r, s->g, s->b, s->a);
         }
     }
-
-    destroyScreen(&screen);
-    return result;
 }
 
+static void fbgl_drawSubScr(fbgl_Screen* screen, fbgl_SubScreen* s) {
+	int minX = (int)((s->posX + 1.f) * screen->deNormFactorX);
+	int maxX = (int)((s->posX + s->width + 1.f) * screen->deNormFactorX);
+	int minY = (int)((1.f - s->posY) * screen->deNormFactorY);
+	int maxY = (int)((1.f - (s->posY + s->height)) * screen->deNormFactorY);
 
+	if (s->style == LINES) {
+		fbgl_drawSubScrXBox(screen, s, minX, maxX, minY, maxY);
+	} else if (s->style == SOLID) {
+		fbgl_drawSubScrFill(screen, s, minX, maxX, minY, maxY);
+	} else {
+		printf ("Only subscreen fill styles LINES and SOLID are currently supported.\n");
+	}
 
+	if (s->child) {
+		fbgl_drawSubScr(screen, s->child);
+	}
+	if (s->sibling) {
+		fbgl_drawSubScr(screen, s->sibling);
+	}
+}
 
+void fbgl_draw(fbgl_Screen* screen) {
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// int main()
-// {
-//     int fbFile = 0;
-//     struct fb_var_screeninfo fbInfoV;
-//     struct fb_fix_screeninfo fbInfoF;
-//     long int fbSizeBytes = 0;
-//     char* fbp = 0;
-//     int x = 0, y = 0;
-//     long int location = 0;
-
-//     // Open the file for reading and writing
-//     fbFile = open("/dev/fb0", O_RDWR);
-//     if (fbFile == -1) {
-//         perror("Error: cannot open framebuffer device");
-//         exit(1);
-//     }
-//     printf("The framebuffer device was opened successfully.\n");
-
-//     // Get fixed screen information
-//     if (ioctl(fbFile, FBIOGET_FSCREENINFO, &fbInfoF) == -1) {
-//         perror("Error reading fixed information");
-//         exit(2);
-//     }
-
-//     // Get variable screen information
-//     if (ioctl(fbFile, FBIOGET_VSCREENINFO, &fbInfoV) == -1) {
-//         perror("Error reading variable information");
-//         exit(3);
-//     }
-
-//     printf("%dx%d, %dbpp\n", fbInfoV.xres, fbInfoV.yres, fbInfoV.bits_per_pixel);
-
-//     // Figure out the size of the screen in bytes
-//     fbSizeBytes = fbInfoV.xres * fbInfoV.yres * fbInfoV.bits_per_pixel / 8;
-
-//     // Map the device to memory
-//     fbp = (char *)mmap(0, fbSizeBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fbFile, 0);
-//     if ((int)fbp == -1) {
-//         perror("Error: failed to map framebuffer device to memory");
-//         exit(4);
-//     }
-//     printf("The framebuffer device was mapped to memory successfully.\n");
-
-//     x = 100; y = 100;       // Where we are going to put the pixel
-
-//     // Figure out where in memory to put the pixel
-//     for (y = 100; y < 300; y++)
-//         for (x = 100; x < 300; x++) {
-
-//             location = (x+fbInfoV.xoffset) * (fbInfoV.bits_per_pixel/8) +
-//                        (y+fbInfoV.yoffset) * fbInfoF.line_length;
-
-//             if (fbInfoV.bits_per_pixel == 32) {
-//                 *(fbp + location) = 15+(x-100)/2;
-//                 *(fbp + location + 1) = 200-(y-100)/5;
-//                 *(fbp + location + 2) = 100;
-//                 *(fbp + location + 3) = 0;
-//         //location += 4;
-//             } else  { //assume 16bpp
-//                 int b = 10;
-//                 int g = (x-100)/6;     // A little green
-//                 int r = 31-(y-100)/16;    // A lot of red
-//                 unsigned short int t = r<<11 | g << 5 | b;
-//                 *((unsigned short int*)(fbp + location)) = t;
-//             }
-
-//         }
-//     munmap(fbp, fbSizeBytes);
-//     close(fbFile);
-//     return 0;
-// }
+	if (screen->child) {
+		fbgl_drawSubScr(screen, screen->child);
+	}
+}

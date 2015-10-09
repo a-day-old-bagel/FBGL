@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "fbgl.h"
+#include "fbglMath.h"
 
 #define WHICH_FB "fb0"
 
@@ -29,6 +30,16 @@ static void fbgl_initObjCollection(fbgl_ObjCollection* objs) {
 	objs->lt2 = NULL;
 }
 
+static void fbgl_subscrUpdateMat(fbgl_SubScreen* subscr) {
+	fbgl_Mat4 transMat, scaleMat;
+    fbgl_mat4Translate(&transMat, subscr->posX, subscr->posY, 0.f);
+    //fbgl_mat4Ident(&transMat);
+    fbgl_mat4Scale(&scaleMat, subscr->width * 0.5, subscr->height * 0.5, 1.f);
+    fbgl_mat4xMat4(&scaleMat, &transMat, &subscr->screenMat);
+
+	// fbgl_mat4Ident(&subscr->screenMat);
+}
+
 void fbgl_initSubScr(fbgl_SubScreen* subscr) {
 	subscr->posX = -0.9f;
 	subscr->posY = -0.9f;
@@ -41,7 +52,7 @@ void fbgl_initSubScr(fbgl_SubScreen* subscr) {
 	subscr->style = LINES;
 	fbgl_initObjCollection(&subscr->objs);
 	subscr->child = NULL;
-	subscr->sibling = NULL;
+	subscr->sibling = NULL;	
 }
 
 void fbgl_destroySubScr(fbgl_SubScreen* subscr) {
@@ -92,7 +103,45 @@ int fbgl_initScreen(fbgl_Screen* screen) {
     screen->deNormFactorY = (float)screen->height / 2.f;
     screen->BpPixel = fbInfoV.bits_per_pixel / 8;
     screen->BpLine = fbInfoF.line_length;
-    screen->BpScreen =  screen->width * screen->height * screen->BpPixel;
+    screen->BpScreen = screen->width * screen->height * screen->BpPixel;
+    
+    fbgl_Mat4 transMat, scaleMat;
+    fbgl_mat4Translate(&transMat, 1.f, -1.f, 0.f);
+    fbgl_mat4Scale(&scaleMat,
+    	(float)screen->width / 2.f, (float)screen->height / -2.f, 1.f);
+    fbgl_mat4xMat4(&scaleMat, &transMat, &screen->deviceMat.mat);
+    screen->stackTop = &screen->deviceMat;
+
+    unsigned int n;//, m;
+    for (n = 0; n < 4; ++n) {
+    	screen->corners[n].v[0] = n % 2 ? 1.f : -1.f;
+    	screen->corners[n].v[1] = n / 2 ? -1.f : 1.f;
+    	screen->corners[n].v[2] = 0.f;
+    	screen->corners[n].v[3] = 1.f;
+    }
+
+/*
+	unsigned int i, j;
+	printf("\n");
+	for (i = 0; i < 4; ++i) {
+		for (j = 0; j < 4; ++j) {
+			printf("%f\t", corners[i].v[j]);
+		}
+		printf("\n");
+	}						
+	for (i = 0; i < 4; ++i) {
+		fbgl_Vec4 temp;
+		fbgl_mat4xVec4(&screen->deviceMat.mat, &corners[i], &temp);
+		corners[i] = temp;
+	}
+	printf("\n");
+	for (i = 0; i < 4; ++i) {
+		for (j = 0; j < 4; ++j) {
+			printf("%f\t", corners[i].v[j]);
+		}
+		printf("\n");
+	}
+*/
 
     screen->fb = (uint8_t*)mmap(0, screen->BpScreen, PROT_READ | PROT_WRITE, MAP_SHARED, screen->fbFile, 0);
     if ((intptr_t)screen->fb == -1) {
@@ -104,6 +153,7 @@ int fbgl_initScreen(fbgl_Screen* screen) {
 }
 
 int fbgl_makeSubScrMajor(fbgl_Screen* parentScreen, fbgl_SubScreen* subscr) {
+	fbgl_subscrUpdateMat(subscr);
 	if (parentScreen->child) {
 		return fbgl_addSibling(parentScreen->child, subscr);
 	} else {
@@ -113,9 +163,11 @@ int fbgl_makeSubScrMajor(fbgl_Screen* parentScreen, fbgl_SubScreen* subscr) {
 }
 
 int fbgl_makeSubScrMinor(fbgl_SubScreen* parentSubscr, fbgl_SubScreen* subscr) {
-	// keep list of subscrs that have been used as parameters, then if second parameter is in that list, error (loop)
-	// OR use Floyd's algorithm on each sibling (at end of function)
+	// keep list of subscrs that have been used as parameters, then if second
+	// parameter is in that list, error (loop) OR use Floyd's algorithm on
+	// each sibling (at end of function)
 
+	fbgl_subscrUpdateMat(subscr);
 	if (parentSubscr->child) {
 		return fbgl_addSibling(parentSubscr->child, subscr);
 	} else {
@@ -130,10 +182,11 @@ static inline int fbgl_sign(int val) {
     // -1 if neg, 0 if 0, +1 if pos
 }
 
-static inline void fbgl_drawPixel(fbgl_Screen* screen, int x, int y,
+// inline?
+static void fbgl_drawPixel(fbgl_Screen* screen, int x, int y,
 								  int r, int g, int b, int a) {
 	uint32_t pixOffset = x * screen->BpPixel + y * screen->BpLine;	
-	if (pixOffset <= screen->BpScreen) {
+	if (pixOffset < screen->BpScreen) {
 		uint8_t* memLoc = screen->fb + pixOffset;
 		*memLoc   = b;
 	    *++memLoc = g;
@@ -142,6 +195,7 @@ static inline void fbgl_drawPixel(fbgl_Screen* screen, int x, int y,
 	}
 }
 
+// Bresenham's algorithm
 static void fbgl_drawLineSolid(fbgl_Screen* screen, int x0, int y0,
 							   int x1, int y1, int r, int g, int b, int a){
 	int dx = abs(x1 - x0);
@@ -199,19 +253,85 @@ static void fbgl_drawSubScrFill(fbgl_Screen* screen, fbgl_SubScreen* s,
     }
 }
 
-static void fbgl_drawSubScr(fbgl_Screen* screen, fbgl_SubScreen* s) {
-	int minX = (int)((s->posX + 1.f) * screen->deNormFactorX);
-	int maxX = (int)((s->posX + s->width + 1.f) * screen->deNormFactorX);
-	int minY = (int)((1.f - s->posY) * screen->deNormFactorY);
-	int maxY = (int)((1.f - (s->posY + s->height)) * screen->deNormFactorY);
-
-	if (s->style == LINES) {
-		fbgl_drawSubScrXBox(screen, s, minX, maxX, minY, maxY);
-	} else if (s->style == SOLID) {
-		fbgl_drawSubScrFill(screen, s, minX, maxX, minY, maxY);
-	} else {
-		printf ("Only subscreen fill styles LINES and SOLID are currently supported.\n");
+static void fbgl_drawOs2(fbgl_Screen* screen, fbgl_ObjectSolid2d* obj) {
+	if (obj->next) {
+		fbgl_drawOs2(screen, obj->next);
 	}
+}
+static void fbgl_drawOv2(fbgl_Screen* screen, fbgl_ObjectVaried2d* obj) {
+	if (obj->next) {
+		fbgl_drawOv2(screen, obj->next);
+	}
+}
+static void fbgl_drawOt2(fbgl_Screen* screen, fbgl_ObjectTexed2d* obj) {
+	if (obj->next) {
+		fbgl_drawOt2(screen, obj->next);
+	}
+}
+static void fbgl_drawLs2(fbgl_Screen* screen, fbgl_LineSolid2d* obj) {
+	if (obj->next) {
+		fbgl_drawLs2(screen, obj->next);
+	}
+}
+static void fbgl_drawLv2(fbgl_Screen* screen, fbgl_LineVaried2d* obj) {
+	if (obj->next) {
+		fbgl_drawLv2(screen, obj->next);
+	}
+}
+static void fbgl_drawLt2(fbgl_Screen* screen, fbgl_LineTexed2d* obj) {
+	if (obj->next) {
+		fbgl_drawLt2(screen, obj->next);
+	}
+}
+
+static void fbgl_pushMatrix(fbgl_Screen* screen, fbgl_Mat4StackNode* node,
+							fbgl_Mat4* mat) {
+	fbgl_mat4xMat4(mat, &screen->stackTop->mat, &node->mat);
+	node->last = screen->stackTop;
+	screen->stackTop = node;
+}
+
+static void fbgl_popMatrix(fbgl_Screen* screen) {
+	screen->stackTop = screen->stackTop->last;
+}
+
+static void fbgl_drawSubScr(fbgl_Screen* screen, fbgl_SubScreen* s) {
+	fbgl_Mat4StackNode node;
+	fbgl_pushMatrix(screen, &node, &s->screenMat);
+	if (s->style != NONE) {
+		// int minX = (int)((s->posX + 1.f) * screen->deNormFactorX);
+		// int maxX = (int)((s->posX + s->width + 1.f) * screen->deNormFactorX);
+		// int minY = (int)((1.f - s->posY) * screen->deNormFactorY);
+		// int maxY = (int)((1.f - (s->posY + s->height)) * screen->deNormFactorY);		
+
+		fbgl_Vec4 vTL, vBR;
+		fbgl_mat4xVec4(&screen->stackTop->mat, &screen->corners[0], &vTL);
+		fbgl_mat4xVec4(&screen->stackTop->mat, &screen->corners[3], &vBR);
+		int minX = (int)vTL.v[0];
+		int maxX = (int)vBR.v[0];
+		int minY = (int)vTL.v[1];
+		int maxY = (int)vBR.v[1];
+
+		printf("%i %i %i %i\n", minX, maxX, minY, maxY);
+
+		switch(s->style) {
+			case LINES:
+				fbgl_drawSubScrXBox(screen, s, minX, maxX, minY, maxY);
+				break;
+			case SOLID:
+				fbgl_drawSubScrFill(screen, s, minX, maxX, minY, maxY);
+				break;
+			default:
+				break;
+		}		
+	}
+
+	if (s->objs.os2 != NULL) fbgl_drawOs2(screen, s->objs.os2);
+	if (s->objs.ov2 != NULL) fbgl_drawOv2(screen, s->objs.ov2);
+	if (s->objs.ot2 != NULL) fbgl_drawOt2(screen, s->objs.ot2);
+	if (s->objs.ls2 != NULL) fbgl_drawLs2(screen, s->objs.ls2);
+	if (s->objs.lv2 != NULL) fbgl_drawLv2(screen, s->objs.lv2);
+	if (s->objs.lt2 != NULL) fbgl_drawLt2(screen, s->objs.lt2);
 
 	if (s->child) {
 		fbgl_drawSubScr(screen, s->child);
@@ -219,6 +339,8 @@ static void fbgl_drawSubScr(fbgl_Screen* screen, fbgl_SubScreen* s) {
 	if (s->sibling) {
 		fbgl_drawSubScr(screen, s->sibling);
 	}
+
+	fbgl_popMatrix(screen);
 }
 
 void fbgl_draw(fbgl_Screen* screen) {

@@ -1,8 +1,11 @@
-fbglTest : fbgl.o fbglTest.o
-	gcc -o fbglTest fbgl.o fbglTest.o
+fbglTest : fbgl.o fbglMath.o fbglTest.o
+	gcc -O3 -o fbglTest fbgl.o fbglMath.o fbglTest.o
 
-fbgl.o : fbgl.c fbgl.h
-	gcc -Wall -c fbgl.c
+fbglMath.o : fbgl.h fbgl.c fbglMath.h fbglMath.c
+	gcc -O3 -Wall -c fbglMath.c
 
-fbglTest.o : fbglTest.c fbgl.h
-	gcc -Wall -c fbglTest.c
+fbgl.o : fbgl.h fbgl.c fbglMath.h fbglMath.c
+	gcc -O3 -Wall -c fbgl.c
+
+fbglTest.o : fbglTest.c fbgl.h fbgl.c fbglMath.h fbglMath.c
+	gcc -O3 -Wall -c fbglTest.c

@@ -17,10 +17,29 @@
 #define _W2 2
 #define _W3 3
 
+typedef enum {NONE, LINES, SOLID, COLORED, TEXTURED} FillStyle;
+
 /*******************************************************************************
 * FBGL TYPES
 *******************************************************************************/
-typedef enum {NONE, LINES, SOLID, COLORED, TEXTURED} FillStyle;
+typedef struct fbgl_ObjectSolid2d 	fbgl_ObjectSolid2d;
+typedef struct fbgl_ObjectVaried2d 	fbgl_ObjectVaried2d;
+typedef struct fbgl_ObjectTexed2d 	fbgl_ObjectTexed2d;
+typedef struct fbgl_LineSolid2d 	fbgl_LineSolid2d;
+typedef struct fbgl_LineVaried2d 	fbgl_LineVaried2d;
+typedef struct fbgl_LineTexed2d 	fbgl_LineTexed2d;
+typedef struct fbgl_ObjCollection 	fbgl_ObjCollection;
+typedef struct fbgl_SubScreen 		fbgl_SubScreen;
+typedef struct fbgl_Screen 			fbgl_Screen;
+typedef struct fbgl_Vec2			fbgl_Vec2;
+typedef struct fbgl_Vec3  			fbgl_Vec3;
+typedef struct fbgl_Vec4  			fbgl_Vec4;
+typedef struct fbgl_Color 			fbgl_Color;
+typedef struct fbgl_Texture			fbgl_Texture;
+typedef struct fbgl_TexCoord		fbgl_TexCoord;
+typedef struct fbgl_Mat3			fbgl_Mat3;
+typedef struct fbgl_Mat4			fbgl_Mat4;
+typedef struct fbgl_Mat4StackNode   fbgl_Mat4StackNode;
 #ifdef FBGL_SHORT_NAMES
 typedef struct fbgl_ObjectSolid2d 	ObjectSolid2d;
 typedef struct fbgl_ObjectVaried2d 	ObjectVaried2d;
@@ -33,40 +52,29 @@ typedef struct fbgl_SubScreen 		SubScreen;
 typedef struct fbgl_Screen 			Screen;
 typedef struct fbgl_Vec2			Vec2;
 typedef struct fbgl_Vec3  			Vec3;
+typedef struct fbgl_Vec4  			Vec4;
 typedef struct fbgl_Color 			Color;
 typedef struct fbgl_Texture			Texture;
 typedef struct fbgl_TexCoord		TexCoord;
 typedef struct fbgl_Mat3			Mat3;
 typedef struct fbgl_Mat4			Mat4;
+typedef struct fbgl_Mat4StackNode   Mat4StackNode;
 #endif
-typedef struct fbgl_ObjectSolid2d 	fbgl_ObjectSolid2d;
-typedef struct fbgl_ObjectVaried2d 	fbgl_ObjectVaried2d;
-typedef struct fbgl_ObjectTexed2d 	fbgl_ObjectTexed2d;
-typedef struct fbgl_LineSolid2d 	fbgl_LineSolid2d;
-typedef struct fbgl_LineVaried2d 	fbgl_LineVaried2d;
-typedef struct fbgl_LineTexed2d 	fbgl_LineTexed2d;
-typedef struct fbgl_ObjCollection 	fbgl_ObjCollection;
-typedef struct fbgl_SubScreen 		fbgl_SubScreen;
-typedef struct fbgl_Screen 			fbgl_Screen;
-typedef struct fbgl_Vec2			fbgl_Vec2;
-typedef struct fbgl_Vec3  			fbgl_Vec3;
-typedef struct fbgl_Color 			fbgl_Color;
-typedef struct fbgl_Texture			fbgl_Texture;
-typedef struct fbgl_TexCoord		fbgl_TexCoord;
-typedef struct fbgl_Mat3			fbgl_Mat3;
-typedef struct fbgl_Mat4			fbgl_Mat4;
 
 /*******************************************************************************
 * FBGL TYPE DEFINITIONS
 *******************************************************************************/
 struct fbgl_Vec2 {
-	float pos[3];
+	float v[2];
 };
 struct fbgl_Vec3 {
-	float pos[4];
+	float v[3];
+};
+struct fbgl_Vec4 {
+	float v[4];
 };
 struct fbgl_Color {
-	float val[4];
+	uint8_t c[4];
 };
 struct fbgl_Texture {
 	uint8_t* image;
@@ -78,10 +86,14 @@ struct fbgl_TexCoord {
 	float v;
 };
 struct fbgl_Mat3 {
-	float val[9];
+	float m[3][3];
 };
 struct fbgl_Mat4 {
-	float val[16];
+	float m[4][4];
+};
+struct fbgl_Mat4StackNode {
+	fbgl_Mat4 mat;
+	fbgl_Mat4StackNode* last;
 };
 struct fbgl_ObjectSolid2d {
 	fbgl_Vec2* vertices;
@@ -130,6 +142,7 @@ struct fbgl_SubScreen {
     fbgl_ObjCollection objs;
     fbgl_SubScreen* child;
     fbgl_SubScreen* sibling;
+    fbgl_Mat4 screenMat;
 };
 struct fbgl_Screen {
     uint8_t* fb;
@@ -140,6 +153,9 @@ struct fbgl_Screen {
     uint8_t BpPixel;  // Bytes per pixel
     uint16_t BpLine;  // Bytes per line
     uint32_t BpScreen; // Bytes per frame
+    fbgl_Vec4 corners[4];
+    fbgl_Mat4StackNode deviceMat;
+    fbgl_Mat4StackNode* stackTop;
     fbgl_SubScreen* child;
 };
 

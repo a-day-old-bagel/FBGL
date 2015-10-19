@@ -32,24 +32,21 @@ static void fbgl_initObjCollection(fbgl_ObjCollection* objs) {
 
 static void fbgl_subscrUpdateMat(fbgl_SubScreen* subscr) {
 	fbgl_Mat4 transMat, scaleMat;
-    fbgl_mat4Translate(&transMat, subscr->posX, subscr->posY, 0.f);
-    //fbgl_mat4Ident(&transMat);
+	fbgl_mat4Translate(&transMat, subscr->posX, subscr->posY, 0.f);
     fbgl_mat4Scale(&scaleMat, subscr->width * 0.5, subscr->height * 0.5, 1.f);
-    fbgl_mat4xMat4(&scaleMat, &transMat, &subscr->screenMat);
-
-	// fbgl_mat4Ident(&subscr->screenMat);
+    fbgl_mat4xMat4(&transMat, &scaleMat, &subscr->screenMat);
 }
 
 void fbgl_initSubScr(fbgl_SubScreen* subscr) {
-	subscr->posX = -0.9f;
-	subscr->posY = -0.9f;
+	subscr->posX = 0.f;
+	subscr->posY = 0.f;
 	subscr->width = 1.8f;
 	subscr->height = 1.8f;
-	subscr->r = 64;
-	subscr->g = 255;
-	subscr->b = 64;
+	subscr->r = 0;
+	subscr->g = 94;
+	subscr->b = 0;
 	subscr->a = 255;
-	subscr->style = LINES;
+	subscr->style = XBOX;
 	fbgl_initObjCollection(&subscr->objs);
 	subscr->child = NULL;
 	subscr->sibling = NULL;	
@@ -96,11 +93,7 @@ int fbgl_initScreen(fbgl_Screen* screen) {
         return 3;
     }
     screen->width = fbInfoV.xres;
-    screen->normFactorX = 2.f / (float)screen->width;
-    screen->deNormFactorX = (float)screen->width / 2.f;
     screen->height = fbInfoV.yres;
-    screen->normFactorY = 2.f / (float)screen->height;
-    screen->deNormFactorY = (float)screen->height / 2.f;
     screen->BpPixel = fbInfoV.bits_per_pixel / 8;
     screen->BpLine = fbInfoF.line_length;
     screen->BpScreen = screen->width * screen->height * screen->BpPixel;
@@ -112,36 +105,13 @@ int fbgl_initScreen(fbgl_Screen* screen) {
     fbgl_mat4xMat4(&scaleMat, &transMat, &screen->deviceMat.mat);
     screen->stackTop = &screen->deviceMat;
 
-    unsigned int n;//, m;
+    unsigned int n;
     for (n = 0; n < 4; ++n) {
     	screen->corners[n].v[0] = n % 2 ? 1.f : -1.f;
     	screen->corners[n].v[1] = n / 2 ? -1.f : 1.f;
     	screen->corners[n].v[2] = 0.f;
     	screen->corners[n].v[3] = 1.f;
     }
-
-/*
-	unsigned int i, j;
-	printf("\n");
-	for (i = 0; i < 4; ++i) {
-		for (j = 0; j < 4; ++j) {
-			printf("%f\t", corners[i].v[j]);
-		}
-		printf("\n");
-	}						
-	for (i = 0; i < 4; ++i) {
-		fbgl_Vec4 temp;
-		fbgl_mat4xVec4(&screen->deviceMat.mat, &corners[i], &temp);
-		corners[i] = temp;
-	}
-	printf("\n");
-	for (i = 0; i < 4; ++i) {
-		for (j = 0; j < 4; ++j) {
-			printf("%f\t", corners[i].v[j]);
-		}
-		printf("\n");
-	}
-*/
 
     screen->fb = (uint8_t*)mmap(0, screen->BpScreen, PROT_READ | PROT_WRITE, MAP_SHARED, screen->fbFile, 0);
     if ((intptr_t)screen->fb == -1) {
@@ -179,7 +149,6 @@ int fbgl_makeSubScrMinor(fbgl_SubScreen* parentSubscr, fbgl_SubScreen* subscr) {
 // Coolest function ever.
 static inline int fbgl_sign(int val) {
     return (0 < val) - (val < 0);
-    // -1 if neg, 0 if 0, +1 if pos
 }
 
 // inline?
@@ -246,7 +215,7 @@ static void fbgl_drawSubScrXBox(fbgl_Screen* screen, fbgl_SubScreen* s,
 static void fbgl_drawSubScrFill(fbgl_Screen* screen, fbgl_SubScreen* s,
 						  	    int minX, int maxX, int minY, int maxY) {
 	int x, y;
-	for (y = minY; y > maxY; --y) {	// y is upside down
+	for (y = minY; y < maxY; ++y) {	// y is upside down
         for (x = minX; x < maxX; ++x) {
         	fbgl_drawPixel(screen, x, y, s->r, s->g, s->b, s->a);
         }
@@ -286,7 +255,7 @@ static void fbgl_drawLt2(fbgl_Screen* screen, fbgl_LineTexed2d* obj) {
 
 static void fbgl_pushMatrix(fbgl_Screen* screen, fbgl_Mat4StackNode* node,
 							fbgl_Mat4* mat) {
-	fbgl_mat4xMat4(mat, &screen->stackTop->mat, &node->mat);
+	fbgl_mat4xMat4(&screen->stackTop->mat, mat, &node->mat);
 	node->last = screen->stackTop;
 	screen->stackTop = node;
 }
@@ -298,12 +267,8 @@ static void fbgl_popMatrix(fbgl_Screen* screen) {
 static void fbgl_drawSubScr(fbgl_Screen* screen, fbgl_SubScreen* s) {
 	fbgl_Mat4StackNode node;
 	fbgl_pushMatrix(screen, &node, &s->screenMat);
+	
 	if (s->style != NONE) {
-		// int minX = (int)((s->posX + 1.f) * screen->deNormFactorX);
-		// int maxX = (int)((s->posX + s->width + 1.f) * screen->deNormFactorX);
-		// int minY = (int)((1.f - s->posY) * screen->deNormFactorY);
-		// int maxY = (int)((1.f - (s->posY + s->height)) * screen->deNormFactorY);		
-
 		fbgl_Vec4 vTL, vBR;
 		fbgl_mat4xVec4(&screen->stackTop->mat, &screen->corners[0], &vTL);
 		fbgl_mat4xVec4(&screen->stackTop->mat, &screen->corners[3], &vBR);
@@ -312,10 +277,8 @@ static void fbgl_drawSubScr(fbgl_Screen* screen, fbgl_SubScreen* s) {
 		int minY = (int)vTL.v[1];
 		int maxY = (int)vBR.v[1];
 
-		printf("%i %i %i %i\n", minX, maxX, minY, maxY);
-
 		switch(s->style) {
-			case LINES:
+			case XBOX:
 				fbgl_drawSubScrXBox(screen, s, minX, maxX, minY, maxY);
 				break;
 			case SOLID:

@@ -17,7 +17,7 @@
 #define _W2 2
 #define _W3 3
 
-typedef enum {NONE, LINES, SOLID, COLORED, TEXTURED} FillStyle;
+typedef enum {NONE, BORDER, XBOX, SOLID, COLORED, TEXTURED} FillStyle;
 
 /*******************************************************************************
 * FBGL TYPES
@@ -148,8 +148,6 @@ struct fbgl_Screen {
     uint8_t* fb;
     int fbFile;
     uint16_t width, height;
-    float normFactorX, deNormFactorX;
-    float normFactorY, deNormFactorY;
     uint8_t BpPixel;  // Bytes per pixel
     uint16_t BpLine;  // Bytes per line
     uint32_t BpScreen; // Bytes per frame

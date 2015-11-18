@@ -34,7 +34,7 @@ static void fbgl_subscrUpdateMat(fbgl_SubScreen* subscr) {
 	fbgl_Mat4 transMat, scaleMat;
 	fbgl_mat4Translate(&transMat, subscr->posX, subscr->posY, 0.f);
     fbgl_mat4Scale(&scaleMat, subscr->width * 0.5, subscr->height * 0.5, 1.f);
-    fbgl_mat4xMat4(&transMat, &scaleMat, &subscr->screenMat);
+    fbgl_mat4xMat4(&subscr->screenMat, &transMat, &scaleMat);
 }
 
 void fbgl_initSubScr(fbgl_SubScreen* subscr) {
@@ -102,7 +102,7 @@ int fbgl_initScreen(fbgl_Screen* screen) {
     fbgl_mat4Translate(&transMat, 1.f, -1.f, 0.f);
     fbgl_mat4Scale(&scaleMat,
     	(float)screen->width / 2.f, (float)screen->height / -2.f, 1.f);
-    fbgl_mat4xMat4(&scaleMat, &transMat, &screen->deviceMat.mat);
+    fbgl_mat4xMat4(&screen->deviceMat.mat, &scaleMat, &transMat);
     screen->stackTop = &screen->deviceMat;
 
     unsigned int n;
@@ -152,15 +152,15 @@ static inline int fbgl_sign(int val) {
 }
 
 // inline?
-static void fbgl_drawPixel(fbgl_Screen* screen, int x, int y,
-								  int r, int g, int b, int a) {
+static void fbgl_drawPixel(	fbgl_Screen* screen, int x, int y,
+				int r, int g, int b, int a) {
 	uint32_t pixOffset = x * screen->BpPixel + y * screen->BpLine;	
 	if (pixOffset < screen->BpScreen) {
 		uint8_t* memLoc = screen->fb + pixOffset;
 		*memLoc   = b;
-	    *++memLoc = g;
-	    *++memLoc = r;
-	    *++memLoc = a;
+	 	*++memLoc = g;
+	 	*++memLoc = r;
+	 	*++memLoc = a;
 	}
 }
 
@@ -255,7 +255,7 @@ static void fbgl_drawLt2(fbgl_Screen* screen, fbgl_LineTexed2d* obj) {
 
 static void fbgl_pushMatrix(fbgl_Screen* screen, fbgl_Mat4StackNode* node,
 							fbgl_Mat4* mat) {
-	fbgl_mat4xMat4(&screen->stackTop->mat, mat, &node->mat);
+	fbgl_mat4xMat4(&node->mat, &screen->stackTop->mat, mat);
 	node->last = screen->stackTop;
 	screen->stackTop = node;
 }
@@ -270,8 +270,8 @@ static void fbgl_drawSubScr(fbgl_Screen* screen, fbgl_SubScreen* s) {
 	
 	if (s->style != NONE) {
 		fbgl_Vec4 vTL, vBR;
-		fbgl_mat4xVec4(&screen->stackTop->mat, &screen->corners[0], &vTL);
-		fbgl_mat4xVec4(&screen->stackTop->mat, &screen->corners[3], &vBR);
+		fbgl_mat4xVec4(&vTL, &screen->stackTop->mat, &screen->corners[0]);
+		fbgl_mat4xVec4(&vBR, &screen->stackTop->mat, &screen->corners[3]);
 		int minX = (int)vTL.v[0];
 		int maxX = (int)vBR.v[0];
 		int minY = (int)vTL.v[1];
